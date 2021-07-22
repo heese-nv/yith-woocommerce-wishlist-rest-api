@@ -31,4 +31,6 @@ list.
 #### Remove product from a wish list
 
 **`DELETE /wishlists/{wish_list_id}/product/{product_id}`**: Removes a product id from a wish list. The current user must have permission to
-write the wish list.
+write the wish list. The endpoint can have an optional request parameter `add_to_cart`. If the value of this parameter is `1` then the
+product is transferred to the user's cart before removing it from the wish list. The product is not removed from the wish list, if the
+product cannot be added to the cart.

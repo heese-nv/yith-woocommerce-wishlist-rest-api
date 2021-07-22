@@ -7,6 +7,10 @@
 
 namespace YITH\Wishlist;
 
+use Exception;
+use WC_Cart;
+use WC_Customer;
+use WC_Session_Handler;
 use WP_Error;
 use WP_REST_Response;
 use YITH_WCWL_Wishlist;
@@ -85,6 +89,8 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 */
 		public static function init() {
 			self::register_routes();
+
+			add_filter( 'woocommerce_is_rest_api_request', [ __CLASS__, 'simulate_as_not_rest' ] );
 		}
 
 		/**
@@ -103,6 +109,29 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 			}
 
 			do_action( 'yith_rest_wishlist_after_register_route' );
+		}
+
+		/**
+		 * We have to tell WC that this should not be handled as a REST request.
+		 * Otherwise we can't use the product loop template contents properly.
+		 * Since WooCommerce 3.6
+		 *
+		 * @param bool $is_rest_api_request
+		 * @return bool
+		 */
+		public static function simulate_as_not_rest( $is_rest_api_request ) {
+			if ( empty( $_SERVER['REQUEST_URI'] ) ) {
+				return $is_rest_api_request;
+			}
+
+			// Bail early if this is not our request.
+
+			// TODO INCLUDE
+//			if ( false === strpos( $_SERVER['REQUEST_URI'], self::REST_NAMESPACE ) ) {
+//				return $is_rest_api_request;
+//			}
+
+			return false;
 		}
 
 		/**
@@ -236,14 +265,48 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		public static function delete_product( $request ) {
 			$wish_list_id = self::get_sanitised_param( $request, 'id' );
 			$product_id   = self::get_sanitised_param( $request, 'product_id' );
+			$add_to_cart  = self::get_sanitised_param( $request, 'add_to_cart' );
 
 			$wish_list = self::load_wish_list( $wish_list_id );
 			if ( $product_id ) {
-				$wish_list->remove_product( $product_id );
-				$wish_list->save();
+				$can_remove = true;
+				if ( $add_to_cart ) {
+					$item       = $wish_list->get_product( $product_id );
+					$quantity   = $item ? $item->get_quantity( 'edit' ) : 1;
+					$can_remove = self::add_to_cart( $product_id, $quantity );
+				}
+
+				if ( $can_remove ) {
+					$wish_list->remove_product( $product_id );
+					$wish_list->save();
+				}
 			}
 
 			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+		}
+
+		/**
+		 * Add product to the user's cart.
+		 *
+		 * @param int $product_id product ID.
+		 * @param int $quantity   quantity of product.
+		 * @return bool whether or not the product was successfully added to the cart
+		 */
+		private static function add_to_cart( int $product_id, int $quantity ): bool {
+			try {
+				// Taken from: https://wordpress.org/support/topic/wc-cart-is-null-in-custom-rest-api.
+				WC()->frontend_includes();
+
+				WC()->session = new WC_Session_Handler();
+				WC()->session->init();
+				WC()->customer = new WC_Customer( get_current_user_id(), true );
+				WC()->cart     = new WC_Cart();
+				WC()->cart->add_to_cart( $product_id );
+
+				return true;
+			} catch ( Exception $e ) { // @codingStandardsIgnoreLine
+				return false; // Tough luck.
+			}
 		}
 
 		/**
@@ -254,7 +317,8 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 * @return int|null
 		 */
 		public static function get_sanitised_param( $request, string $name ) {
-			return isset( $request[ $name ] ) && ! empty( $request[ $name ] ) ? intval( wp_unslash( $request[ $name ] ) ) : null;
+			return isset( $request[ $name ] ) && ! empty( $request[ $name ] ) ?
+				intval( sanitize_text_field( wp_unslash( $request[ $name ] ) ) ) : null;
 		}
 
 		/**
