@@ -7,12 +7,11 @@
 
 namespace YITH\Wishlist;
 
-use Exception;
 use WP_Error;
 use WP_REST_Response;
-use YITH_WCWL_Exception;
 use YITH_WCWL_Wishlist;
 use YITH_WCWL_Wishlist_Factory;
+use YITH_WCWL_Wishlist_Item;
 
 if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 	/**
@@ -118,7 +117,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 
 			$dtos = array();
 			foreach ( $wish_lists as $wish_list ) {
-				$dtos[] = self::wish_list_to_rest( $wish_list );
+				$dtos[] = self::to_rest_wish_list( $wish_list );
 			}
 
 			return new WP_REST_Response( $dtos );
@@ -160,7 +159,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 				return self::response_not_found();
 			}
 
-			return new WP_REST_Response( self::wish_list_to_rest( $wish_list ) );
+			return new WP_REST_Response( self::to_rest_wish_list( $wish_list ) );
 		}
 
 		/**
@@ -176,26 +175,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 				return self::response_not_found();
 			}
 
-			return new WP_REST_Response( self::wish_list_to_rest( $wish_list ) );
-		}
-
-		/**
-		 * Convert the wish list to a DTO.
-		 *
-		 * @param YITH_WCWL_Wishlist $wish_list Wish list.
-		 * @return array
-		 */
-		private static function wish_list_to_rest( $wish_list ) {
-			if ( ! $wish_list ) {
-				return null;
-			}
-
-			return array(
-				'id'         => $wish_list->get_id(),
-				'user_id'    => $wish_list->get_user_id( 'edit' ),
-				'date_added' => $wish_list->get_date_added_formatted( 'c' ),
-				'default'    => $wish_list->get_is_default( 'view' ),
-			);
+			return new WP_REST_Response( self::to_rest_wish_list( $wish_list ) );
 		}
 
 		/**
@@ -224,8 +204,91 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 				return self::response_not_found();
 			}
 
-			$dto = array();
-			foreach ( $wish_list->get_items() as $item ) {
+
+			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+		}
+
+		/**
+		 * Adds a product to given wish list
+		 *
+		 * @param array $request HTTP request.
+		 * @return WP_REST_Response
+		 */
+		public static function post_product( $request ) {
+			$wish_list_id = self::get_sanitised_param( $request, 'id' );
+			$product_id   = self::get_sanitised_param( $request, 'product_id' );
+
+			$wish_list = self::load_wish_list( $wish_list_id );
+			if ( $product_id ) {
+				$wish_list->add_product( $product_id );
+				$wish_list->save();
+			}
+
+			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+		}
+
+		/**
+		 * Removes a product from given wish list
+		 *
+		 * @param array $request HTTP request.
+		 * @return WP_REST_Response
+		 */
+		public static function delete_product( $request ) {
+			$wish_list_id = self::get_sanitised_param( $request, 'id' );
+			$product_id   = self::get_sanitised_param( $request, 'product_id' );
+
+			$wish_list = self::load_wish_list( $wish_list_id );
+			if ( $product_id ) {
+				$wish_list->remove_product( $product_id );
+				$wish_list->save();
+			}
+
+			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+		}
+
+		/**
+		 * Get a sanitised request parameter.
+		 *
+		 * @param array  $request HTTP request.
+		 * @param string $name    name of the parameter.
+		 * @return int|null
+		 */
+		public static function get_sanitised_param( $request, string $name ) {
+			return isset( $request[ $name ] ) && ! empty( $request[ $name ] ) ? intval( wp_unslash( $request[ $name ] ) ) : null;
+		}
+
+		/**
+		 * Convert a wish list to a DTO.
+		 *
+		 * @param YITH_WCWL_Wishlist|null $wish_list Wish list.
+		 * @return array
+		 */
+		private static function to_rest_wish_list( $wish_list ) {
+			if ( ! $wish_list ) {
+				return null;
+			}
+
+			return array(
+				'id'         => $wish_list->get_id(),
+				'user_id'    => $wish_list->get_user_id( 'edit' ),
+				'date_added' => $wish_list->get_date_added_formatted( 'c' ),
+				'default'    => $wish_list->get_is_default( 'view' ),
+			);
+		}
+
+		/**
+		 * Convert an array of wish list items to DTOs.
+		 *
+		 * @param YITH_WCWL_Wishlist_Item[]|null $items Wish list.
+		 * @return array
+		 */
+		private static function to_rest_wish_list_items( $items ) {
+			if ( ! $items ) {
+				return array();
+			}
+
+			$dtos = array();
+			foreach ( $items as $item ) {
 				$product = wc_get_product( $item->get_product_id( 'edit' ) );
 
 				$product_dto = null;
@@ -245,7 +308,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 					);
 				}
 
-				$dto[] = array(
+				$dtos[] = array(
 					'id'          => $item->get_id(),
 					'wishlist_id' => $item->get_wishlist_id( 'edit' ),
 					'date_added'  => $item->get_date_added_formatted( 'c' ),
@@ -254,119 +317,10 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 				);
 			}
 
-			return new WP_REST_Response( $dto );
-		}
-
-		/**
-		 * Adds a product to given wish list
-		 *
-		 * @param array $request HTTP request.
-		 * @return WP_REST_Response
-		 */
-		public static function post_product( $request ) {
-			$wish_list_id = self::get_sanitised_param( $request, 'id' );
-			$product_id   = self::get_sanitised_param( $request, 'product_id' );
-			$quantity     = self::get_sanitised_param( $request, 'quantity' );
-
-			if ( ! $product_id ) {
-				return self::response_not_found();
-			}
-
-			$args = array(
-				'add_to_wishlist' => $product_id,
-				'user_id'         => get_current_user_id(),
-				'quantity'        => $quantity,
-				'wishlist_id'     => $wish_list_id,
+			return array(
+				'items' => $dtos,
+				'size'  => count( $dtos ),
 			);
-
-			if ( $wish_list_id ) {
-				$args['wishlist_id'] = $wish_list_id;
-			}
-
-			try {
-				YITH_WCWL()->add( $args );
-			} catch ( YITH_WCWL_Exception $e ) {
-				return new WP_REST_Response(
-					array(
-						'status' => 422,
-						'error'  => $e->getMessage(),
-					),
-					422
-				);
-			} catch ( Exception $e ) {
-				return new WP_REST_Response(
-					array(
-						'status' => 500,
-						'error'  => $e->getMessage(),
-					),
-					500
-				);
-			}
-
-			// successful! return updated wishlist.
-			$wish_list = self::load_wish_list( $wish_list_id );
-
-			return new WP_REST_Response( $wish_list->get_data() );
-		}
-
-		/**
-		 * Removes a product from given wish list
-		 *
-		 * @param array $request HTTP request.
-		 * @return WP_REST_Response
-		 */
-		public static function delete_product( $request ) {
-			$wish_list_id = self::get_sanitised_param( $request, 'id' );
-			$product_id   = self::get_sanitised_param( $request, 'product_id' );
-
-			if ( ! $product_id || ! $wish_list_id ) {
-				return self::response_not_found();
-			}
-
-			$args = array(
-				'remove_from_wishlist' => $product_id,
-				'user_id'              => get_current_user_id(),
-				'wishlist_id'          => $wish_list_id,
-			);
-
-			try {
-				YITH_WCWL()->remove( $args );
-			} catch ( YITH_WCWL_Exception $e ) {
-				return new WP_REST_Response(
-					array(
-						'status' => 422,
-						'error'  => $e->getMessage(),
-					),
-					422
-				);
-			} catch ( Exception $e ) {
-				return new WP_REST_Response(
-					array(
-						'status' => 500,
-						'error'  => $e->getMessage(),
-					),
-					500
-				);
-			}
-
-			// successful! return updated wish list.
-			$wish_list = self::load_wish_list( $wish_list_id );
-			if ( ! $wish_list ) {
-				return self::response_not_found();
-			}
-
-			return new WP_REST_Response( $wish_list->get_data() );
-		}
-
-		/**
-		 * Get a sanitised request parameter.
-		 *
-		 * @param array  $request HTTP request.
-		 * @param string $name    name of the parameter.
-		 * @return int|null
-		 */
-		public static function get_sanitised_param( $request, string $name ) {
-			return isset( $request[ $name ] ) && ! empty( $request[ $name ] ) ? intval( wp_unslash( $request[ $name ] ) ) : null;
 		}
 
 		/**
