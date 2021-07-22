@@ -1,25 +1,34 @@
-### Plugin is still under development but the endpoint that is created is tested and working
+### Plugin is still under development, but some endpoints have been implemented and tested.
 
-YITH Woocommerce wishlist REST API plugin exposes REST point to works with YITH Woocommerce wishlist data. This is very helpful for mobile & web app developers who needs json response for their applications.
+YITH Woocommerce wish list REST API plugin exposes REST point to works with YITH Woocommerce wish list data.
 
-**Namespace:** `/yith/wishlist/v1`
+**Namespace:** `/yith/wishlist/v2`
 
-**Full URL:** `/wp-json/yith/wishlist/v1`
+**Full URL:** `/wp-json/yith/wishlist/v2`
 
 ## Endpoints
 
-#### Get wishlists
+#### List wish lists
 
-**`GET /wishlists`**: Get list of wishlist for current user
+**`GET /wishlists`**: Get list of wish lists of the current user.
 
-#### Get single wishlist
+#### Get details of a wish list
 
-**`GET /wishlists/{id}`**: Get a single wishlist by given id
+**`GET /wishlists/{id}`**: Get a single wish list by given ID. If the ID is `0` then the details of the default wish list are returned. The
+current user must have permission to read the wish list.
 
-#### Add product to a wishlist
+#### List the items of a wish list
 
-**`POST /wishlists/{wishlist_id}/product/{product_id}`**: Adds a product id to a wishlist. No post payload is required. if wishlist id is given 0 (`/wishlists/0/product/{product_id}`) a new wishlist will be created.
+**`GET /wishlists/{id}/products`**: List the products of a single wish list identified by `id`. If the ID is `0` then the details of the
+default wish list are returned. The current user must have permission to read the wish list.
 
-#### Remove product from a wishlist
+#### Add product to a wish list
 
-**`DELETE /wishlists/{wishlist_id}/product/{product_id}`**: Removes a product id from a wishlist. 
+**`POST /wishlists/{id}/product/{product_id}`**: Adds a product id to a wish list. No post payload is required. If the ID of the wish list
+is `0` (e.g., `/wishlists/0/product/{product_id}`) then a new wish list is created. The current user must have permission to write the wish
+list.
+
+#### Remove product from a wish list
+
+**`DELETE /wishlists/{wish_list_id}/product/{product_id}`**: Removes a product id from a wish list. The current user must have permission to
+write the wish list.
