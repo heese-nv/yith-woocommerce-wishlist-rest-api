@@ -33,7 +33,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 *
 		 * @var array[]
 		 */
-		protected static $wishlist_routes = array(
+		protected static $routes = array(
 			'get_list'          => array( // get list of wishlist for given user.
 				'route'               => '/wishlists',
 				'methods'             => 'GET',
@@ -90,7 +90,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		public static function init() {
 			self::register_routes();
 
-			add_filter( 'woocommerce_is_rest_api_request', [ __CLASS__, 'simulate_as_not_rest' ] );
+			add_filter( 'woocommerce_is_rest_api_request', array( __CLASS__, 'simulate_as_not_rest' ) );
 		}
 
 		/**
@@ -99,10 +99,10 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		protected static function register_routes() {
 			do_action( 'yith_rest_wishlist_before_register_route' );
 
-			$wishlist_routes = apply_filters( 'yith_rest_wishlist_routes', self::$wishlist_routes );
+			$routes = apply_filters( 'yith_rest_wishlist_routes', self::$routes );
 
 			$prefix = self::REST_NAMESPACE . '/' . self::REST_VERSION;
-			foreach ( $wishlist_routes as $args ) {
+			foreach ( $routes as $args ) {
 				$route = $args['route'];
 				unset( $args['route'] );
 				register_rest_route( $prefix, $route, $args );
@@ -112,24 +112,26 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		}
 
 		/**
+		 * Returns true if the request is a non-legacy REST API request.
+		 *
 		 * We have to tell WC that this should not be handled as a REST request.
 		 * Otherwise we can't use the product loop template contents properly.
-		 * Since WooCommerce 3.6
 		 *
-		 * @param bool $is_rest_api_request
+		 * Taken from: https://wordpress.org/support/topic/wc-cart-is-null-in-custom-rest-api.
+		 *
+		 * @param bool $is_rest_api_request whether this is a REST request.
 		 * @return bool
 		 */
 		public static function simulate_as_not_rest( $is_rest_api_request ) {
-			if ( empty( $_SERVER['REQUEST_URI'] ) ) {
+			$server = wp_unslash( $_SERVER );
+			if ( empty( $server['REQUEST_URI'] ) ) {
 				return $is_rest_api_request;
 			}
 
 			// Bail early if this is not our request.
-
-			// TODO INCLUDE
-//			if ( false === strpos( $_SERVER['REQUEST_URI'], self::REST_NAMESPACE ) ) {
-//				return $is_rest_api_request;
-//			}
+			if ( false === strpos( $server['REQUEST_URI'], self::REST_NAMESPACE ) ) {
+				return $is_rest_api_request;
+			}
 
 			return false;
 		}
@@ -232,7 +234,6 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 			if ( ! $wish_list ) {
 				return self::response_not_found();
 			}
-
 
 			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
 		}
