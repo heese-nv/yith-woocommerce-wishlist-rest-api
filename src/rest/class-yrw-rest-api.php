@@ -5,25 +5,18 @@
  * @package YITH\Wishlist
  */
 
-namespace YITH\Wishlist;
-
-use Exception;
-use WC_Cart;
-use WC_Customer;
-use WC_Session_Handler;
-use WP_Error;
-use WP_REST_Response;
-use YITH_WCWL_Wishlist;
-use YITH_WCWL_Wishlist_Factory;
-use YITH_WCWL_Wishlist_Item;
-
 if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
+
+	require_once 'class-yrw-mapper.php';
+	require_once 'class-yrw-wishlist-mapper.php';
+	require_once 'class-yrw-wishlist-item-mapper.php';
+
 	/**
 	 * Class Rest
 	 *
 	 * @package YITH\Wishlist
 	 */
-	final class Rest {
+	final class Yrw_Rest_API {
 		const REST_NAMESPACE = 'yith/wishlist';
 
 		const REST_VERSION = 'v2';
@@ -34,6 +27,12 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 * @var array[]
 		 */
 		protected static $routes = array(
+			'export'            => array( // get list of wishlist for given user.
+				'route'               => '/wishlists/export',
+				'methods'             => 'GET',
+				'callback'            => array( __CLASS__, 'export' ),
+				'permission_callback' => array( __CLASS__, 'check_api_read_cap' ),
+			),
 			'get_list'          => array( // get list of wishlist for given user.
 				'route'               => '/wishlists',
 				'methods'             => 'GET',
@@ -137,22 +136,28 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		}
 
 		/**
+		 * Export all wishlists.
+		 */
+		public static function export() {
+			$wishlists = YITH_WCWL_Wishlist_Factory::get_wishlists();
+			if ( ! $wishlists ) {
+				$wishlists = array();
+			}
+
+			return self::to_rest_response( $wishlists, new YRW_Wishlist_Mapper() );
+		}
+
+		/**
 		 * Get array of wishlists for current user.
 		 */
 		public static function get_list() {
-			$user_id    = get_current_user_id();
-			$wish_lists = YITH_WCWL_Wishlist_Factory::get_wishlists( array( 'user_id' => $user_id ) );
-			if ( ! $wish_lists ) {
-				$wish_lists = array();
+			$user_id   = get_current_user_id();
+			$wishlists = YITH_WCWL_Wishlist_Factory::get_wishlists( array( 'user_id' => $user_id ) );
+			if ( ! $wishlists ) {
+				$wishlists = array();
 			}
 
-			$dtos = array();
-			foreach ( $wish_lists as $wish_list ) {
-				$dtos[] = self::to_rest_wish_list( $wish_list );
-			}
-
-			return new WP_REST_Response( $dtos );
-
+			return self::to_rest_response( $wishlists, new YRW_Wishlist_Mapper() );
 		}
 
 		/**
@@ -160,6 +165,9 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 */
 		public static function post() {
 			// TODO Implement.
+			self::finalise();
+
+			return new WP_REST_Response();
 		}
 
 		/**
@@ -185,12 +193,12 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 				);
 			}
 
-			$wish_list = self::load_wish_list( $id );
-			if ( ! $wish_list ) {
-				return self::response_not_found();
+			$wishlist = self::load_wish_list( $id );
+			if ( ! $wishlist ) {
+				return self::response_not_found( $id );
 			}
 
-			return new WP_REST_Response( self::to_rest_wish_list( $wish_list ) );
+			return self::to_rest_response( $wishlist, new YRW_Wishlist_Mapper() );
 		}
 
 		/**
@@ -200,13 +208,13 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 * @return WP_REST_Response
 		 */
 		public static function get( $request ) {
-			$id        = self::get_sanitised_param( $request, 'id' );
-			$wish_list = self::load_wish_list( $id );
-			if ( ! $wish_list ) {
-				return self::response_not_found();
+			$id       = self::get_sanitised_param( $request, 'id' );
+			$wishlist = self::load_wish_list( $id );
+			if ( ! $wishlist ) {
+				return self::response_not_found( $id );
 			}
 
-			return new WP_REST_Response( self::to_rest_wish_list( $wish_list ) );
+			return self::to_rest_response( $wishlist, new YRW_Wishlist_Mapper() );
 		}
 
 		/**
@@ -217,6 +225,7 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 */
 		public static function delete( $request ) {
 			$id = isset( $request['id'] ) ? intval( $request['id'] ) : 0;
+			self::finalise();
 
 			return new WP_REST_Response( array( 'id' => $id ) );
 		}
@@ -230,12 +239,12 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		public static function get_list_products( $request ) {
 			$id = self::get_sanitised_param( $request, 'id' );
 
-			$wish_list = self::load_wish_list( $id );
-			if ( ! $wish_list ) {
-				return self::response_not_found();
+			$wishlist = self::load_wish_list( $id );
+			if ( ! $wishlist ) {
+				return self::response_not_found( $id );
 			}
 
-			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+			return self::to_rest_response( $wishlist->get_items(), new YRW_Wishlist_Item_Mapper() );
 		}
 
 		/**
@@ -248,13 +257,13 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 			$wish_list_id = self::get_sanitised_param( $request, 'id' );
 			$product_id   = self::get_sanitised_param( $request, 'product_id' );
 
-			$wish_list = self::load_wish_list( $wish_list_id );
+			$wishlist = self::load_wish_list( $wish_list_id );
 			if ( $product_id ) {
-				$wish_list->add_product( $product_id );
-				$wish_list->save();
+				$wishlist->add_product( $product_id );
+				$wishlist->save();
 			}
 
-			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+			return self::to_rest_response( $wishlist->get_items(), new YRW_Wishlist_Item_Mapper() );
 		}
 
 		/**
@@ -268,22 +277,22 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 			$product_id   = self::get_sanitised_param( $request, 'product_id' );
 			$add_to_cart  = self::get_sanitised_param( $request, 'add_to_cart' );
 
-			$wish_list = self::load_wish_list( $wish_list_id );
+			$wishlist = self::load_wish_list( $wish_list_id );
 			if ( $product_id ) {
 				$can_remove = true;
 				if ( $add_to_cart ) {
-					$item       = $wish_list->get_product( $product_id );
+					$item       = $wishlist->get_product( $product_id );
 					$quantity   = $item ? $item->get_quantity( 'edit' ) : 1;
 					$can_remove = self::add_to_cart( $product_id, $quantity );
 				}
 
 				if ( $can_remove ) {
-					$wish_list->remove_product( $product_id );
-					$wish_list->save();
+					$wishlist->remove_product( $product_id );
+					$wishlist->save();
 				}
 			}
 
-			return new WP_REST_Response( self::to_rest_wish_list_items( $wish_list->get_items() ) );
+			return self::to_rest_response( $wishlist->get_items(), new YRW_Wishlist_Item_Mapper() );
 		}
 
 		/**
@@ -311,6 +320,19 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		}
 
 		/**
+		 * Generate the REST response. This method calls finalise().
+		 *
+		 * @param YITH_WCWL_Wishlist|YITH_WCWL_Wishlist[]|YITH_WCWL_Wishlist_Item $obj    response object.
+		 * @param YRW_Mapper                                                      $mapper mapper to generate DTO.
+		 * @return WP_REST_Response
+		 */
+		private static function to_rest_response( $obj, YRW_Mapper $mapper ) {
+			self::finalise();
+
+			return new WP_REST_Response( $mapper->to_rest( $obj ) );
+		}
+
+		/**
 		 * Get a sanitised request parameter.
 		 *
 		 * @param array  $request HTTP request.
@@ -320,143 +342,6 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		public static function get_sanitised_param( $request, string $name ) {
 			return isset( $request[ $name ] ) && ! empty( $request[ $name ] ) ?
 				intval( sanitize_text_field( wp_unslash( $request[ $name ] ) ) ) : null;
-		}
-
-		/**
-		 * Convert a wish list to a DTO.
-		 *
-		 * @param YITH_WCWL_Wishlist|null $wish_list Wish list.
-		 * @return array
-		 */
-		private static function to_rest_wish_list( $wish_list ) {
-			if ( ! $wish_list ) {
-				return null;
-			}
-
-			return array(
-				'id'         => $wish_list->get_id(),
-				'user_id'    => $wish_list->get_user_id( 'edit' ),
-				'date_added' => $wish_list->get_date_added_formatted( 'c' ),
-				'default'    => $wish_list->get_is_default( 'view' ),
-			);
-		}
-
-		/**
-		 * Convert an array of wish list items to DTOs.
-		 *
-		 * @param YITH_WCWL_Wishlist_Item[]|null $items Wish list.
-		 * @return array
-		 */
-		private static function to_rest_wish_list_items( $items ) {
-			if ( ! $items ) {
-				return array();
-			}
-
-			$dtos = array();
-			foreach ( $items as $item ) {
-				$product = wc_get_product( $item->get_product_id( 'edit' ) );
-
-				$product_dto = null;
-				if ( $product ) {
-					$image_id  = $product->get_image_id();
-					$image_url = wp_get_attachment_image_url( $image_id, 'full' );
-
-					$product_dto = array(
-						'id'          => $product->get_id(),
-						'name'        => $product->get_name(),
-						'description' => $product->get_description( 'edit' ),
-						'sku'         => $product->get_sku( 'edit' ),
-						'price'       => $item->get_product_price( 'edit' ),
-						'currency'    => get_woocommerce_currency(),
-						'permalink'   => $product->get_permalink(),
-						'image_url'   => $image_url,
-					);
-				}
-
-				$dtos[] = array(
-					'id'          => $item->get_id(),
-					'wishlist_id' => $item->get_wishlist_id( 'edit' ),
-					'date_added'  => $item->get_date_added_formatted( 'c' ),
-					'quantity'    => $item->get_quantity( 'edit' ),
-					'product'     => $product_dto,
-				);
-			}
-
-			return array(
-				'items' => $dtos,
-				'size'  => count( $dtos ),
-			);
-		}
-
-		/**
-		 * Checks if user is logged in. Used in rest api permission check.
-		 *
-		 * @param array $request HTTP request.
-		 * @return true|WP_Error
-		 * @noinspection PhpUnusedParameterInspection
-		 */
-		public static function check_auth( $request ) {
-			if ( is_user_logged_in() ) {
-				return true;
-			}
-
-			return new WP_Error(
-				'unauthorized',
-				'Authentication Required',
-				array(
-					'code'    => 401,
-					'message' => 'Authentication Required',
-					'data'    => array(),
-				)
-			);
-		}
-
-		/**
-		 * Checks users read permission for given wish list.
-		 * Used in rest api permission check.
-		 *
-		 * @param array $request HTTP request.
-		 * @return bool|true|WP_Error|WP_REST_Response
-		 */
-		public static function check_read_cap( $request ) {
-			$res = self::check_auth( $request );
-			if ( is_wp_error( $res ) ) {
-				return $res;
-			}
-
-			$id = isset( $request['id'] ) ? (int) $request['id'] : 0;
-
-			if ( ! $id ) {
-				return self::response_not_found();
-			}
-
-			$wish_list = self::load_wish_list( $id );
-			if ( ! $wish_list->current_user_can( 'view' ) ) {
-				return self::response_not_authorized( 'read' );
-			}
-
-			return true;
-		}
-
-		/**
-		 * Checks users read permission for given wish list.
-		 * Used in rest api permission check.
-		 *
-		 * @param array $request HTTP request.
-		 * @return bool|WP_REST_Response
-		 */
-		public static function check_write_cap( $request ) {
-			$id = isset( $request['id'] ) ? intval( $request['id'] ) : 0;
-			if ( ! $id ) {
-				return self::response_not_found();
-			}
-
-			$wish_list = self::load_wish_list( $id );
-			if ( ! $wish_list->current_user_can( 'write' ) ) {
-				return self::response_not_authorized( 'write' );
-			}
-
-			return true;
 		}
 
 		/**
@@ -470,15 +355,168 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		}
 
 		/**
+		 * Clean up. Otherwise the subsequent call might use the previously logged in user (e.g., in Insomnia).
+		 * - Destroy session
+		 * - Logout
+		 */
+		private static function finalise() {
+			wp_destroy_current_session();
+			wp_logout();
+		}
+
+		/**
+		 * Checks if user is logged in. Used in REST API permission check.
+		 * Calls finalise() on error.
+		 *
+		 * @param array $request HTTP request.
+		 * @return true|WP_Error
+		 * @noinspection PhpUnusedParameterInspection
+		 */
+		public static function check_auth( $request ) {
+			if ( is_user_logged_in() ) {
+				return true;
+			}
+
+			self::finalise();
+
+			return new WP_Error(
+				'unauthorized',
+				'Authentication Required',
+				array(
+					'code'    => 401,
+					'message' => 'Authentication Required',
+					'data'    => array(),
+				)
+			);
+		}
+
+		/**
+		 * Checks users read permission for all wish lists.
+		 * Used in rest api permission check.
+		 *
+		 * @param array $request HTTP request.
+		 * @return bool|true|WP_Error
+		 */
+		public static function check_api_read_cap( $request ) {
+			$res = self::check_auth( $request );
+			if ( is_wp_error( $res ) ) {
+				return $res;
+			}
+
+			if ( ! current_user_can( 'api_wishlist_export' ) ) {
+				return self::permission_not_authorized( 'read' );
+			}
+
+			return true;
+		}
+
+		/**
+		 * Checks users read permission for given wish list.
+		 * Used in rest api permission check.
+		 *
+		 * @param array $request HTTP request.
+		 * @return bool|true|WP_Error
+		 */
+		public static function check_read_cap( $request ) {
+			$res = self::check_auth( $request );
+			if ( is_wp_error( $res ) ) {
+				return $res;
+			}
+
+			$id = isset( $request['id'] ) ? (int) $request['id'] : 0;
+
+			if ( ! $id ) {
+				return self::permission_not_found( $id );
+			}
+
+			$wish_list = self::load_wish_list( $id );
+			if ( ! $wish_list ) {
+				// A caught exception is logged. This cannot be easily avoided.
+				return self::permission_not_found( $id );
+			}
+
+			if ( ! $wish_list->current_user_can( 'view' ) ) {
+				return self::permission_not_authorized( 'read' );
+			}
+
+			return true;
+		}
+
+		/**
+		 * Checks users read permission for given wish list.
+		 * Used in rest api permission check.
+		 *
+		 * @param array $request HTTP request.
+		 * @return bool|WP_Error
+		 */
+		public static function check_write_cap( $request ) {
+			$id = isset( $request['id'] ) ? intval( $request['id'] ) : 0;
+			if ( ! $id ) {
+				return self::permission_not_found( $id );
+			}
+
+			$wish_list = self::load_wish_list( $id );
+			if ( ! $wish_list->current_user_can( 'write' ) ) {
+				return self::permission_not_authorized( 'write' );
+			}
+
+			return true;
+		}
+
+		/**
+		 * Get a unauthorised response used in the context of 'permission_callback'.
+		 *
+		 * @param string $operation operation not permitted.
+		 * @return WP_Error
+		 */
+		public static function permission_not_authorized( $operation ) {
+			self::finalise();
+
+			return new WP_Error(
+				403,
+				__( 'Access denied', 'yith-rest-wishlist' ),
+				array(
+					'status' => rest_authorization_required_code(),
+					// translators: 1) operation name.
+					'error'  => sprintf( __( 'You do not have permission to %s', 'yith-rest-wishlist' ), $operation ),
+				),
+			);
+		}
+
+		/**
+		 * Get a unauthorised response used in the context of 'permission_callback'.
+		 *
+		 * @param string $id wishlist ID.
+		 * @return WP_Error
+		 */
+		public static function permission_not_found( $id ) {
+			self::finalise();
+
+			return new WP_Error(
+				403,
+				__( 'Not found', 'yith-rest-wishlist' ),
+				array(
+					'status' => rest_authorization_required_code(),
+					// translators: 1) wishlist ID.
+					'error'  => sprintf( __( 'Wishlist %s was not found', 'yith-rest-wishlist' ), $id ),
+				),
+			);
+		}
+
+		/**
 		 * Get a not-found response.
 		 *
+		 * @param string $id wishlist ID.
 		 * @return WP_REST_Response
 		 */
-		public static function response_not_found() {
+		public static function response_not_found( $id ) {
+			self::finalise();
+
 			return new WP_REST_Response(
 				array(
 					'status' => 404,
-					'error'  => 'Wishlist not found!',
+					// translators: 1) wishlist ID.
+					'error'  => sprintf( __( 'Wishlist %s was not found', 'yith-rest-wishlist' ), $id ),
 				),
 				404
 			);
@@ -491,12 +529,14 @@ if ( ! class_exists( '\YITH\Wishlist\Rest' ) ) {
 		 * @return WP_REST_Response
 		 */
 		protected static function response_not_authorized( $operation ) {
+			self::finalise();
+
 			return new WP_REST_Response(
 				array(
-					'status' => 403,
+					'status' => rest_authorization_required_code(),
 					'error'  => "You do not have permission to $operation.",
 				),
-				403
+				rest_authorization_required_code()
 			);
 		}
 	}

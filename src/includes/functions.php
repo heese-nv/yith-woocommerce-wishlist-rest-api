@@ -5,4 +5,4 @@
  * @package YITH\Wishlist
  */
 
-namespace YITH\Wishlist;
+// nothing yet.

@@ -11,6 +11,7 @@
  * WC requires at least: 4.2.0
  * WC tested up to: 5.7.2
  *
+ * @wordpress-plugin
  * @author  Sisir
  * @package YITH WooCommerce Wishlist REST API
  * @version 0.1.0
@@ -33,19 +34,25 @@
 	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 */
 
-use YITH\Wishlist\Rest_Plugin;
-
+// @codingStandardsIgnoreLine
 defined( 'ABSPATH' ) || exit;
+
+
+if ( ! defined( 'YITH_WISHLIST_REST_PLUGIN_FILE' ) ) {
+	define( 'YITH_WISHLIST_REST_PLUGIN_FILE', __FILE__ );
+}
+
+// Include the main SLA Integration class.
+if ( ! class_exists( 'Yith_Rest_Wishlist', false ) ) {
+	include_once dirname( YITH_WISHLIST_REST_PLUGIN_FILE ) . '/includes/class-yith-rest-wishlist.php';
+}
 
 /**
  * Load the plugin.
  */
-function yith_rest_load() {
-	if ( defined( 'YITH_WCWL' ) && YITH_WCWL ) {
-		require_once __DIR__ . '/rest/includes.php';
-		Rest_Plugin::init();
-	}
+function run_yrw() {
+	$plugin = new Yith_Rest_Wishlist();
+	$plugin->run();
 }
 
-add_action( 'init', 'yith_rest_load' );
-
+run_yrw();
